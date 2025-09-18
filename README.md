@@ -22,7 +22,7 @@ Run the following commands to clone, create a virtual environment, and install d
 ### Linux/macOS
 
 ```console
-git clone https://github.com:tetratensor/LiveKit-Outbound-Caller-Voice-Agent.git
+git clone https://github.com/tetratensor/LiveKit-Outbound-Caller-Voice-Agent.git
 cd LiveKit-Outbound-Caller-Voice-Agent
 python3 -m venv venv
 source venv/bin/activate
@@ -34,7 +34,7 @@ pip install -r requirements.txt
   
 ```cmd
 :: Windows (CMD/PowerShell)
-git clone https://github.com:tetratensor/LiveKit-Outbound-Caller-Voice-Agent.git
+git clone https://github.com/tetratensor/LiveKit-Outbound-Caller-Voice-Agent.git
 cd LiveKit-Outbound-Caller-Voice-Agent
 python -m venv venv
 venv\Scripts\activate
@@ -137,3 +137,12 @@ lk sip dispatch list
 - Ensure all required environment variables are present: run `python3 agent.py healthcheck`.
 - First run may download models; use `python3 agent.py download-files` to prewarm.
 - For more logs, run with `--log-level DEBUG`, e.g. `python3 agent.py --log-level DEBUG dev`.
+
+## CLI reference
+
+```console
+python3 agent.py dev            # run the worker locally
+python3 agent.py healthcheck    # validate required env vars
+python3 agent.py download-files # pre-download/cache models (e.g., VAD)
+python3 agent.py prewarm        # alias to download/cache models
+```
