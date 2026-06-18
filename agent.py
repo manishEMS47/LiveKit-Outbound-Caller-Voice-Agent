@@ -18,6 +18,8 @@ from livekit.agents import (
 from livekit.agents.pipeline import VoicePipelineAgent
 from livekit.plugins import deepgram, openai, silero
 
+import sixtydb_tts
+
 
 """LiveKit outbound caller agent.
 
@@ -53,9 +55,20 @@ REQUIRED_ENV_VARS = (
     "LIVEKIT_URL",
     "LIVEKIT_API_KEY",
     "LIVEKIT_API_SECRET",
-    "OPENAI_API_KEY",
-    "DEEPGRAM_API_KEY",
+    "OPENAI_API_KEY",  # LLM (and TTS fallback)
+    "DEEPGRAM_API_KEY",  # STT
     "SIP_OUTBOUND_TRUNK_ID",
+)
+
+# Which TTS provider speaks on the call. Deepgram always handles STT.
+# "60db"   -> 60db.ai WebSocket TTS (default)
+# "openai" -> OpenAI TTS (fallback)
+TTS_PROVIDER = os.getenv("TTS_PROVIDER", "60db").strip().lower()
+
+# Required only when TTS_PROVIDER == "60db".
+SIXTYDB_ENV_VARS = (
+    "SIXTYDB_API_KEY",
+    "SIXTYDB_VOICE_ID",
 )
 
 
@@ -67,11 +80,17 @@ def validate_required_env() -> None:
     ValueError
         If any required environment variable is missing or invalid.
     """
-    missing = [name for name in REQUIRED_ENV_VARS if not os.getenv(name)]
+    required = list(REQUIRED_ENV_VARS)
+    if TTS_PROVIDER == "60db":
+        required += list(SIXTYDB_ENV_VARS)
+
+    missing = [name for name in required if not os.getenv(name)]
     if missing:
         raise ValueError(
             f"Missing required environment variables: {', '.join(missing)}"
         )
+    if TTS_PROVIDER not in ("60db", "openai"):
+        raise ValueError("TTS_PROVIDER must be '60db' or 'openai'")
     trunk_id = os.getenv("SIP_OUTBOUND_TRUNK_ID", "")
     if not trunk_id.startswith("ST_"):
         raise ValueError("SIP_OUTBOUND_TRUNK_ID must start with 'ST_'")
@@ -206,6 +225,19 @@ class CallActions(llm.FunctionContext):
         await self.hangup()
 
 
+def build_tts():
+    """Build the TTS engine selected by the TTS_PROVIDER env var.
+
+    Deepgram always handles speech-to-text; this only controls the *voice*.
+    Defaults to 60db, falling back to OpenAI TTS when TTS_PROVIDER=openai.
+    """
+    if TTS_PROVIDER == "60db":
+        logger.info("using 60db WebSocket TTS")
+        return sixtydb_tts.TTS()  # reads SIXTYDB_API_KEY / SIXTYDB_VOICE_ID from env
+    logger.info("using OpenAI TTS")
+    return openai.TTS()
+
+
 def run_voice_pipeline_agent(
     ctx: JobContext, participant: rtc.RemoteParticipant, instructions: str
 ) -> None:
@@ -220,7 +252,7 @@ def run_voice_pipeline_agent(
         vad=ctx.proc.userdata["vad"],
         stt=deepgram.STT(model="nova-2-phonecall"),
         llm=openai.LLM(),
-        tts=openai.TTS(),
+        tts=build_tts(),
         chat_ctx=initial_ctx,
         fnc_ctx=CallActions(api=ctx.api, participant=participant, room=ctx.room),
     )

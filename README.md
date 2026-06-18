@@ -2,9 +2,25 @@
 
 Build and run a voice agent that makes outbound PSTN calls using LiveKit. This example wires up VAD, STT, LLM, and TTS into a Voice Pipeline and includes a small CLI for local development, health checks, and model prewarming.
 
+The agent **listens with Deepgram** (speech-to-text) and **speaks with 60db** (text-to-speech) by default, with OpenAI TTS available as a fallback.
+
+## Pipeline
+
+```
+Caller audio ──► Silero VAD ──► Deepgram STT ──► OpenAI LLM ──► TTS ──► Caller
+                 (turn detect)   (transcribe)    (+ tools)      │
+                                                                ├─ 60db   (default)
+                                                                └─ OpenAI (fallback)
+```
+
+The voice/TTS stage is swappable via the `TTS_PROVIDER` env var. Speech-to-text
+is always Deepgram. The 60db integration lives in `sixtydb_tts.py`, a
+self-contained LiveKit `tts.TTS` plugin that streams audio over 60db's
+`ws/tts` WebSocket.
+
 ## Features
 
-- Voice Pipeline with Silero VAD, Deepgram STT, OpenAI LLM + TTS
+- Voice Pipeline with Silero VAD, Deepgram STT, OpenAI LLM, and 60db TTS (OpenAI TTS fallback)
 - Outbound PSTN calls via LiveKit SIP Outbound Trunks
 - Callable tools for call control and basic appointment flows
 - Simple CLI: `dev`, `healthcheck`, `download-files`, `prewarm`
@@ -14,6 +30,7 @@ Build and run a voice agent that makes outbound PSTN calls using LiveKit. This e
 - Python 3.10+
 - LiveKit Cloud project and `lk` CLI installed
 - Accounts/API keys for OpenAI and Deepgram
+- A 60db (60db.ai) account + API key and a `voice_id` (only when `TTS_PROVIDER=60db`, the default)
 
 ## Setup
 
@@ -52,12 +69,37 @@ Copy `.env.example` to `.env.local` and fill in the values:
 - `OPENAI_API_KEY`
 - `DEEPGRAM_API_KEY`
 - `SIP_OUTBOUND_TRUNK_ID` (from steps below)
+- `TTS_PROVIDER` — `60db` (default) or `openai`
+- `SIXTYDB_API_KEY` and `SIXTYDB_VOICE_ID` (required when `TTS_PROVIDER=60db`)
 
 You can also populate LiveKit variables via CLI:
 
 ```console
 lk app env
 ```
+
+### Voice provider: 60db TTS
+
+By default the agent **listens with Deepgram (STT)** and **speaks with 60db (TTS)**.
+The voice provider is selected with the `TTS_PROVIDER` env var:
+
+- `TTS_PROVIDER=60db` (default) — uses 60db's realtime WebSocket TTS (`ws/tts`).
+  Requires `SIXTYDB_API_KEY` and `SIXTYDB_VOICE_ID`.
+- `TTS_PROVIDER=openai` — falls back to OpenAI TTS (no 60db keys needed).
+
+Get a `voice_id` from your 60db account:
+
+```console
+curl -H "Authorization: Bearer $SIXTYDB_API_KEY" https://api.60db.ai/myvoices
+```
+
+Pick a `voice_id` from the `data` array and set it as `SIXTYDB_VOICE_ID`.
+
+The 60db integration (`sixtydb_tts.py`) is a self-contained LiveKit `tts.TTS`
+plugin. Audio is requested as `LINEAR16` @ 8 kHz so it feeds straight into the
+LiveKit pipeline (PCM16); the SIP layer handles the final telephony encoding.
+Optional overrides: `SIXTYDB_WS_URL`, `SIXTYDB_TTS_ENCODING` (`LINEAR16`/`MULAW`),
+`SIXTYDB_TTS_SAMPLE_RATE`.
 
 ### Optional: pre-download models
 
@@ -137,6 +179,13 @@ lk sip dispatch list
 - Ensure all required environment variables are present: run `python3 agent.py healthcheck`.
 - First run may download models; use `python3 agent.py download-files` to prewarm.
 - For more logs, run with `--log-level DEBUG`, e.g. `python3 agent.py --log-level DEBUG dev`.
+- **No audio / silent caller with 60db:** verify `SIXTYDB_VOICE_ID` is a real id from
+  `GET https://api.60db.ai/myvoices`, and that `SIXTYDB_API_KEY` is valid. To isolate the
+  TTS layer, temporarily set `TTS_PROVIDER=openai` — if the call speaks, the issue is in the
+  60db config/credentials, not the pipeline.
+- **Robotic / wrong-pitch audio with 60db:** the wire encoding and the frame sample rate must
+  match. Defaults are `LINEAR16` @ `8000` Hz; if you override `SIXTYDB_TTS_SAMPLE_RATE`, keep
+  `SIXTYDB_TTS_ENCODING` consistent.
 
 ## CLI reference
 
